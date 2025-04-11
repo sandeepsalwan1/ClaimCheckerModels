@@ -64,3 +64,45 @@ To test the extension with the latest accuracy improvements:
 7. Click on any source link to see the evidence for a correction
 
 Contributions are welcome! Please open an issue or submit a pull request.
+
+
+
+
+Check if validd
+Write tests first, then the code, then run the tests and update the code until tests pass.
+
+Please add logs to the code to get better visibility into what is going on so we can find the fix. I'll run the code and feed you the logs results
+
+
+Fundamental Principles
+
+1. Write clean, simple, readable code  
+2. Implement features in the simplest possible way  
+3. Keep files small and focused (<200 lines)  
+4. Test after every meaningful change  
+5. Focus on core functionality before optimization  
+6. Use clear, consistent naming  
+7. Think thoroughly before coding. Write 2–3 reasoning paragraphs.  
+8. ALWAYS write simple, clean, and modular code.  
+9. Use clear and easy-to-understand language. Write in short sentences.
+
+Error Fixing
+
+- DO NOT JUMP TO CONCLUSIONS! Consider multiple possible causes before deciding.  
+- Explain the problem in plain English.  
+- Make minimal necessary changes, changing as few lines of code as possible.  
+- In case of strange errors, ask the user to perform a Perplexity Web search to get the most up-to-date information.
+
+Debugging
+
+- Briefly review how each feature works by telling the user how to test it.  
+- DO NOT write complicated and confusing code. Opt for the simplest approach.  
+- When not sure what to do, tell the user to perform a web search.
+
+Building
+
+- ALWAYS try to add more helpful and explanatory comments into your code.  
+- NEVER delete old comments — unless they are obviously wrong or obsolete.  
+- Include LOTS of explanatory comments in your code. ALWAYS be well-labeled.  
+- Document all changes and their reasoning in the comments you write.  
+- When writing comments, use clear and easy-to-understand language.

@@ -189,8 +189,66 @@ document.addEventListener('DOMContentLoaded', function() {
       factsList.innerHTML = '<p>No specific facts were analyzed in this article.</p>';
     }
   }
-}); 
+});
 
+// Add a test function for the SVM model
+async function testSvmModel() {
+  try {
+    // Import and initialize the model
+    const { AI } = await import('./ai_models.js');
+    const svmModel = new AI.SVMFactCheckModel();
+    
+    // Log status
+    console.log('Testing SVM model in browser environment...');
+    
+    // Test claims
+    const testClaims = [
+      "The unemployment rate is at a 50-year low of 3.5%.",
+      "Global temperatures have risen by 1.1 degrees Celsius since pre-industrial times."
+    ];
+    
+    // Wait for model initialization
+    setTimeout(async () => {
+      console.log('Running SVM model test...');
+      
+      for (const claim of testClaims) {
+        const result = await svmModel.verifyClaim(claim);
+        console.log(`SVM Result for "${claim}": ${result.isTrue ? 'TRUE' : 'FALSE'} (${result.confidence}% confidence)`);
+      }
+      
+      console.log('SVM test completed');
+    }, 5000);
+    
+    return true;
+  } catch (error) {
+    console.error('SVM test error:', error);
+    return false;
+  }
+}
+
+// Initialize the extension
+function initializeExtension() {
+  console.log('Initializing NewsFactChecker popup...');
+  // Any initialization code can go here
+  
+  // Check for active tab analysis status
+  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+    if (tabs && tabs[0]) {
+      checkAnalysisStatus(tabs[0].id);
+    }
+  });
+}
+
+// Run SVM test when the extension loads
+document.addEventListener('DOMContentLoaded', () => {
+  // Run the initialization code
+  initializeExtension();
+  
+  // Also run the SVM test
+  testSvmModel().then(success => {
+    console.log('SVM test initialization:', success ? 'SUCCESS' : 'FAILED');
+  });
+});
 
 /*
 

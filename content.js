@@ -1,9 +1,57 @@
+// At the top of the file, add a context check
+// This is a content script, so document should always be available
+if (typeof document === 'undefined') {
+  console.error('Content script running in a context where document is not available!');
+} else {
+  console.log('Content script running with document access available');
+}
+
+// Map to track which corrections have been added to the footnote
+const addedCorrections = new Map();
+
+// Use a flag to track if we've initialized yet
+let factCheckerInitialized = false;
+
+// Initialize when the page loads
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', initializeFactChecker);
+  
+  // Also initialize immediately (for already-loaded pages)
+  initializeFactChecker();
+}
+
+function initializeFactChecker() {
+  // Only initialize once
+  if (factCheckerInitialized) return;
+  factCheckerInitialized = true;
+  
+  console.log('NewsFactChecker initialized on page:', window.location.href);
+}
+
 // Listen for messages from the popup
 chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+  console.log("Content script received message:", message);
+  
   if (message.action === "analyze") {
-    // Start the analysis process
-    startAnalysis();
-    sendResponse({status: "analyzing"});
+    console.log("Starting analysis...");
+    // Extract article content
+    const article = extractArticleContent();
+    console.log("Extracted article:", article);
+    
+    // Send article content to background script for processing
+    chrome.runtime.sendMessage({
+      action: "processArticle",
+      article: article
+    }, function(response) {
+      if (chrome.runtime.lastError) {
+        console.error('Error sending article to background:', chrome.runtime.lastError);
+        sendResponse({status: "error", message: "Failed to start analysis"});
+      } else {
+        console.log("Article sent to background script");
+        sendResponse({status: "analyzing"});
+      }
+    });
+    
     return true; // Keep the message channel open for asynchronous response
   }
   
@@ -14,122 +62,98 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
   }
 });
 
-// Function to start the analysis process
-function startAnalysis() {
-  // Extract article content
-  const articleData = extractArticleContent();
-  
-  // Send the extracted content to the background script for processing
-  chrome.runtime.sendMessage({
-    action: "processArticle",
-    article: articleData
-  });
-}
-
-// Function to extract article content from the page
 function extractArticleContent() {
-  // Initialize article data
-  const articleData = {
-    title: document.title,
-    url: window.location.href,
-    mainContent: "",
-    paragraphs: [],
-    metadata: {}
-  };
+  // Get article title
+  let title = '';
+  const titleElement = document.querySelector('h1');
+  if (titleElement) {
+    title = titleElement.textContent.trim();
+  } else {
+    title = document.title;
+  }
+
+  // Get article paragraphs - improved selector list
+  const paragraphs = [];
   
-  // Try to find the article content using common article selectors
+  // Try multiple selectors to find article content
   const selectors = [
-    'article',
-    '.article',
+    '.article-content', 
+    'article', 
+    '[role="article"]', 
     '.post-content',
     '.entry-content',
-    '.content',
+    '.article-body',
     'main',
-    '#content',
-    '.story',
-    '.news-article'
+    '#content'
   ];
   
-  // Find the article container
-  let articleContainer = null;
+  let articleContent = null;
+  
+  // Try each selector until we find content
   for (const selector of selectors) {
     const element = document.querySelector(selector);
     if (element) {
-      articleContainer = element;
+      articleContent = element;
       break;
     }
   }
   
-  // If no article container found, use the body
-  if (!articleContainer) {
-    articleContainer = document.body;
+  // If no article container was found, fall back to body
+  if (!articleContent) {
+    articleContent = document.body;
   }
   
-  // Extract the main heading
-  const headingSelectors = ['h1', '.headline', '.article-title', '.entry-title'];
-  for (const selector of headingSelectors) {
-    const headingElement = articleContainer.querySelector(selector);
-    if (headingElement) {
-      articleData.title = headingElement.textContent.trim();
-      break;
+  // Find all paragraphs in the article content
+  const pElements = articleContent.querySelectorAll('p');
+  for (const p of pElements) {
+    // Skip if paragraph is too short or appears to be a caption/metadata
+    if (p.textContent.trim().length > 20 && !p.closest('figure, figcaption, nav, header, footer')) {
+      paragraphs.push(p.textContent.trim());
     }
   }
   
-  // Extract author if available
-  const authorSelectors = ['.author', '.byline', '.article-meta', 'meta[name="author"]'];
-  for (const selector of authorSelectors) {
-    const authorElement = document.querySelector(selector);
-    if (authorElement) {
-      if (selector === 'meta[name="author"]') {
-        articleData.metadata.author = authorElement.getAttribute('content');
-      } else {
-        articleData.metadata.author = authorElement.textContent.trim();
+  // If no paragraphs were found, use all text nodes
+  if (paragraphs.length === 0) {
+    const textNodes = [];
+    const walker = document.createTreeWalker(
+      articleContent,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    );
+    
+    let node;
+    while (node = walker.nextNode()) {
+      const text = node.nodeValue.trim();
+      if (text.length > 20) {
+        textNodes.push(text);
       }
-      break;
     }
-  }
-  
-  // Extract date if available
-  const dateSelectors = [
-    'time', 
-    '.date', 
-    '.published', 
-    '.post-date', 
-    'meta[property="article:published_time"]'
-  ];
-  
-  for (const selector of dateSelectors) {
-    const dateElement = document.querySelector(selector);
-    if (dateElement) {
-      if (selector === 'meta[property="article:published_time"]') {
-        articleData.metadata.date = dateElement.getAttribute('content');
-      } else if (dateElement.hasAttribute('datetime')) {
-        articleData.metadata.date = dateElement.getAttribute('datetime');
-      } else {
-        articleData.metadata.date = dateElement.textContent.trim();
+    
+    // Group text nodes into paragraph-sized chunks
+    let currentParagraph = '';
+    for (const text of textNodes) {
+      currentParagraph += text + ' ';
+      if (currentParagraph.length > 100) {
+        paragraphs.push(currentParagraph.trim());
+        currentParagraph = '';
       }
-      break;
+    }
+    
+    // Add the last paragraph if it exists
+    if (currentParagraph.trim().length > 0) {
+      paragraphs.push(currentParagraph.trim());
     }
   }
   
-  // Extract all paragraphs from the article
-  const paragraphs = articleContainer.querySelectorAll('p');
-  paragraphs.forEach(paragraph => {
-    const text = paragraph.textContent.trim();
-    if (text.length > 20) { // Only include paragraphs with substantial content
-      articleData.paragraphs.push(text);
-      articleData.mainContent += text + " ";
-    }
-  });
+  console.log("Extracted paragraphs:", paragraphs.length);
   
-  // Clean up the main content
-  articleData.mainContent = articleData.mainContent.trim();
-  
-  return articleData;
+  return {
+    title,
+    url: window.location.href,
+    paragraphs
+  };
 }
-
-// Map to track which corrections have been added to the footnote
-const addedCorrections = new Map();
 
 // Function to highlight text and add corrections if needed
 function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
@@ -142,7 +166,7 @@ function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
   }
   
   // Find specific numerical values to highlight if we have a correction
-  const valuesToHighlight = [];
+  let valuesToHighlight = [];
   
   if (correction) {
     // Extract the original value to precisely target it
@@ -150,6 +174,13 @@ function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
       value: correction.originalValue,
       replacement: correction.correctedValue
     });
+  } else {
+    // If no correction provided, still look for numerical values to highlight
+    const numericalValues = extractNumericalValues(text);
+    valuesToHighlight = numericalValues.map(val => ({
+      value: val,
+      replacement: null  // No replacement for factually correct values
+    }));
   }
   
   const textNodes = [];
@@ -164,23 +195,36 @@ function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
   
   let node;
   while (node = walker.nextNode()) {
+    // Check for the full text match
     if (node.nodeValue.includes(text)) {
-      textNodes.push(node);
-    } else if (correction && node.nodeValue.includes(correction.originalValue)) {
-      // Also find nodes that contain just the original value for more precise highlighting
-      textNodes.push(node);
+      textNodes.push({node, matchType: 'full', value: text});
+    }
+    // Also check for just numerical values  
+    else if (valuesToHighlight.length > 0) {
+      for (const {value} of valuesToHighlight) {
+        if (node.nodeValue.includes(value)) {
+          textNodes.push({node, matchType: 'value', value});
+        }
+      }
     }
   }
   
+  console.log(`Found ${textNodes.length} text nodes to highlight for: ${text}`);
+  
   // Highlight each occurrence
-  textNodes.forEach(node => {
+  textNodes.forEach(({node, matchType, value}) => {
     const parent = node.parentNode;
     const content = node.nodeValue;
     
-    // If we have a specific value to highlight
-    if (correction && content.includes(correction.originalValue)) {
+    // Skip if this node is already inside a fact-checked element (prevent double highlighting)
+    if (parent.dataset.factChecked === 'true' || parent.closest('[data-fact-checked="true"]')) {
+      return;
+    }
+    
+    // If we're matching a specific numerical value
+    if (matchType === 'value' && correction) {
       // More precise highlighting of just the numerical value
-      const parts = content.split(correction.originalValue);
+      const parts = content.split(value);
       
       if (parts.length > 1) {
         // Create fragment to hold the new nodes
@@ -205,13 +249,13 @@ function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
         
         // Create a more detailed tooltip with source information
         const tooltipTitle = sourceURL ? 
-          `Correction: ${correction.originalValue} → ${correction.correctedValue}. Source: ${evidenceText}` :
-          `Correction: ${correction.originalValue} → ${correction.correctedValue}`;
+          `Correction: ${value} → ${correction.correctedValue}. Source: ${evidenceText}` :
+          `Correction: ${value} → ${correction.correctedValue}`;
         
         highlightedSpan.title = tooltipTitle;
         
         // Add original value with strikethrough
-        highlightedSpan.textContent = correction.originalValue;
+        highlightedSpan.textContent = value;
         
         // Add enhanced tooltip that appears on hover
         const tooltip = document.createElement('span');
@@ -286,12 +330,12 @@ function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
         parent.replaceChild(fragment, node);
         
         // Add to footnote
-        if (correction && !addedCorrections.has(correction.originalValue)) {
+        if (correction && !addedCorrections.has(value)) {
           addFootnoteCorrection(text, correction, sourceURL, evidenceText);
-          addedCorrections.set(correction.originalValue, true);
+          addedCorrections.set(value, true);
         }
       }
-    } else if (content.includes(text)) {
+    } else if (matchType === 'full') {
       // Highlight the entire claim
       const parts = content.split(text);
       
@@ -361,6 +405,28 @@ function highlightText(text, isFactual, correction, sourceURL, evidenceText) {
       }
     }
   });
+}
+
+// Function to extract numerical values from text
+function extractNumericalValues(text) {
+  const values = [];
+  
+  // Comprehensive regex for finding numerical values
+  const patterns = [
+    /\$\d+(?:,\d+)*(?:\.\d+)?\s*(?:billion|million|trillion|thousand)?/g,  // Currency with optional units
+    /\b\d+(?:\.\d+)?%\b/g,  // Percentages
+    /\b\d+(?:,\d+)*(?:\.\d+)?\s+(?:people|individuals|users|customers|years|months|days)\b/g,  // Numbers with units
+  ];
+  
+  // Find all matches
+  patterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      values.push(match[0]);
+    }
+  });
+  
+  return values;
 }
 
 // Function to add a footnote with the correction at the end of the article
@@ -440,7 +506,7 @@ function addFootnoteCorrection(text, correction, sourceURL, evidenceText) {
   correctionItem.style.lineHeight = '1.6';
   correctionItem.style.fontSize = '14px';
   
-  // Create a short snippet of the claim (first 50 chars)
+  // Create a short snippet of the claim (first 80 chars)
   const shortClaim = text.length > 80 ? text.substring(0, 77) + '...' : text;
   
   // Create the HTML for the correction with enhanced source information

@@ -1,0 +1,15 @@
+# PROJECT OVERVIEW
+
+# Our .env variables
+
+# CURRENT FILE STRUCTURE
+
+
+# IMPORTANT
+Do TTD (Test Driven Development). Write tests first, then the code, then run the tests and update the code until tests pass
+
+follow Dave Farley’s recommendations regarding how to write tests, and in particular, unit tests. Essentially, you should make sure the tests test some sort of outcome or functionality, NOT any particular implementation.
+
+# OTHER CONTEXT
+- make sure to **ALWAYS** include comments in your code
+- do not delete comments unless they aren't needed 
